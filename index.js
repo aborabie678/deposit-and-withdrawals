@@ -49,7 +49,7 @@ let systemPaused          = false;
 // ==========================
 // 🔹 تحكم في نظام السحب
 // ==========================
-let WITHDRAWAL_ENABLED = false;
+let WITHDRAWAL_ENABLED = true;
 
 // ==========================
 // 🔹 دالة تقريب المبلغ
@@ -242,23 +242,24 @@ async function sendUserNotification(chatId, amountTon, amountCoins, txHash) {
   if (!botToken || !chatId) return false;
   const txLink  = txHash ? `https://tonscan.org/tx/${encodeURIComponent(txHash)}` : null;
   const caption =
-    `🐼 <b>Panda Treasury Released!</b>\n\nWithdrawal Successful ✅\n\n` +
-    `━━━━━━━━━━━━━━━━\n` +
-    `💰 <b>Amount:</b> ${amountTon.toFixed(6)} TON\n` +
-    `🪙 <b>Bamboo Used:</b> ${Number(amountCoins).toLocaleString()}\n` +
-    (txHash ? `🔑 <b>TxID:</b> <code>${txHash}</code>\n` : ``) +
-    `━━━━━━━━━━━━━━━━\n\n` +
-    `The panda warriors have delivered your reward from the Bamboo Empire treasury.\n\n` +
-    `Thank you for being part of Panda Bamboo Factory. 🎋`;
+    `🔥 <b>RASEENRACING • WITHDRAW SUCCESSFUL</b> 🔥\n` +
+    `Your TON has left the garage and is on the way to your wallet 🏍️💸\n\n` +
+    `━━━━━━━━━━━━━━━━━━\n` +
+    `💎 <b>Withdraw Amount:</b> ${amountTon.toFixed(6)} TON\n` +
+    `━━━━━━━━━━━━━━━━━━\n\n` +
+    `✅ Transaction completed successfully\n` +
+    `⚡ Funds have been sent to your TON wallet\n\n` +
+    `Keep racing. Keep earning. Keep winning 🏁🔥\n\n` +
+    (txLink ? `🔗 <a href="${txLink}">View Transaction</a>` : ``);
   const keys = [];
-  if (txLink) keys.push({ text: "🔍 View TX", url: txLink });
-  keys.push({ text: "🐼 Open App", url: "https://t.me/PandaBamboBot?startapp=" });
+  if (txLink) keys.push({ text: "🔗 View Transaction", url: txLink });
+  keys.push({ text: "🚀 Open App", url: "https://t.me/RaseenRacing_bot/app?startapp=" });
   try {
     const res = await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         chat_id: chatId,
-        photo: "https://i.supaimg.com/ec27537b-aa6a-42cf-8ba1-d6850eeea36d/7c71ad42-e22a-4e4d-86a4-a636b8b7d3a1.jpg",
+        photo: "https://res.cloudinary.com/dktppfipy/image/upload/v1779060536/withdraw_amyrsy.jpg",
         caption, parse_mode: 'HTML',
         reply_markup: { inline_keyboard: [keys] }
       }),
@@ -298,14 +299,14 @@ async function sendChannelNotification(items, txHash) {
     `💰 Total: <b>${totalTON.toFixed(4)} TON</b>\n` +
     (txLink ? `🔗 <a href="${txLink}">View TX on TONScan</a>` : ``);
   const keys = [];
-  if (txLink) keys.push({ text: "🔍 View TX", url: txLink });
-  keys.push({ text: "🐼 Open App", url: "https://t.me/PandaBamboBot?startapp=" });
+  if (txLink) keys.push({ text: "🔗 View Transaction", url: txLink });
+  keys.push({ text: "🚀 Open App", url: "https://t.me/RaseenRacing_bot/app?startapp=" });
   try {
     const res = await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         chat_id: "@PandaBambooPayouts",
-        photo: "https://i.supaimg.com/ec27537b-aa6a-42cf-8ba1-d6850eeea36d/7c71ad42-e22a-4e4d-86a4-a636b8b7d3a1.jpg",
+        photo: "https://res.cloudinary.com/dktppfipy/image/upload/v1779060536/withdraw_amyrsy.jpg",
         caption, parse_mode: 'HTML',
         reply_markup: { inline_keyboard: [keys] }
       }),
@@ -878,26 +879,29 @@ async function checkDeposits() {
       // 🔁 تعديل: إشعار المستخدم برصيد TON (بدون Bamboo وبدون 50% Bonus)
       const formattedTon    = amountTon.toFixed(6);
       const formattedNewBalance = newTonBalance.toFixed(6);
-      const userMessage =
-        `💰 <b>TON Deposit Received!</b>\n\nDeposit Successful ✅\n\n` +
-        `━━━━━━━━━━━━━━━━\n` +
-        `💎 <b>Amount:</b> ${formattedTon} TON\n` +
-        `📊 <b>New TON Balance:</b> ${formattedNewBalance} TON\n` +
-        `━━━━━━━━━━━━━━━━\n\n` +
-        `Your TON has been added to your balance. You can now use it within the app.\n\n` +
-        `Thank you for your support! 🐼\n\n` +
+      const depositCaption =
+        `🔥 <b>RASEENRACING • DEPOSIT SUCCESSFUL</b> 🔥\n` +
+        `Your TON has arrived and you're ready to hit the track 🏍️⚡\n\n` +
+        `━━━━━━━━━━━━━━━━━━\n` +
+        `💎 <b>Deposit:</b> ${formattedTon} TON\n` +
+        `💰 <b>Balance:</b> ${formattedNewBalance} TON\n` +
+        `━━━━━━━━━━━━━━━━━━\n\n` +
+        `🏁 Upgrade your bike\n` +
+        `⚔️ Join PvP races\n` +
+        `⛏️ Start mining TON rewards\n\n` +
+        `The road to victory starts now 🚀\n\n` +
         `🔗 <a href="${txLink}">View Transaction</a>`;
 
-      await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+      await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          chat_id:                userId,
-          text:                   userMessage,
-          parse_mode:             "HTML",
-          disable_web_page_preview: false,
+          chat_id:    userId,
+          photo:      "https://res.cloudinary.com/dktppfipy/image/upload/v1779060536/deposit_glopgj.jpg",
+          caption:    depositCaption,
+          parse_mode: "HTML",
           reply_markup: {
-            inline_keyboard: [[{ text: "🐼 Open App", url: "https://t.me/PandaBamboBot?startapp=" }]]
+            inline_keyboard: [[{ text: "🚀 Open App", url: "https://t.me/RaseenRacing_bot/app?startapp=" }]]
           }
         })
       });
