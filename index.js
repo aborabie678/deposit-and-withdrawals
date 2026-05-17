@@ -947,19 +947,36 @@ function startWelcomeBot() {
 
   // ─── /start ───────────────────────────────────────────
   bot.onText(/\/start/, async (msg) => {
-    const chatId    = msg.chat.id;
-    const firstName = msg.from.first_name || "Warrior";
+    const chatId = msg.chat.id;
     console.log(`👋 /start: ${chatId}`);
-    await adminReply(bot, chatId,
-      `Hey ${firstName}! 👋 You've just joined the coolest virtual factory on Telegram.\n\n` +
-      `🎁 <b>Your starter pack is ready:</b>\n• 200 Coins — free to withdraw right away\n• 100 Bamboo/day — free mining starts immediately\n\n` +
-      `⚙️ <b>How it works:</b>\n1️⃣ Mine — Bamboo accumulates in your tank automatically\n2️⃣ Exchange — Convert Bamboo → Coins in Finance\n3️⃣ Withdraw — Send Coins to your TON wallet 💎\n\n` +
-      `🚀 <b>Boost your earnings:</b>\n— Buy machines from the Market to increase daily output\n— Complete Tasks for bonus Bamboo & Coins\n— Invite friends and earn 20% commission on their purchases`,
-      { reply_markup: { inline_keyboard: [
-        [{ text: "🐼 Open App", url: "https://t.me/PandaBamboBot?startapp=" }],
-        [{ text: "📢 News", url: "https://t.me/PandaMiningNews" }, { text: "💸 Payouts", url: "https://t.me/PandaBambooPayouts" }]
-      ]}}
-    );
+    const caption =
+      `🏍️🔥 <b>Welcome to RaseenRacing!</b>\n\n` +
+      `Race REAL players in intense 3D PvP battles and win TON rewards 💎\n\n` +
+      `🏁 Upgrade your bike\n` +
+      `⛏️ Mine daily TON rewards\n` +
+      `👥 Invite friends &amp; earn commissions\n` +
+      `💰 Withdraw your earnings anytime\n\n` +
+      `🚀 Start now and become a racing legend!`;
+    try {
+      await bot.sendPhoto(chatId,
+        "https://res.cloudinary.com/dktppfipy/image/upload/v1779047977/image_potboz.jpg",
+        {
+          caption,
+          parse_mode: 'HTML',
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: "🚀 Open App", url: "https://t.me/RaseenRacing_bot/app?startapp=" }],
+              [
+                { text: "📢 Channel", url: "https://t.me/RaseenRacing" },
+                { text: "💬 Community", url: "https://t.me/RaseenRacing_chat" }
+              ]
+            ]
+          }
+        }
+      );
+    } catch (e) {
+      console.log(`❌ /start sendPhoto error: ${e.message}`);
+    }
   });
 
   // ─── /help ────────────────────────────────────────────
