@@ -517,13 +517,11 @@ async function sendChannelNotification(items, txHash) {
     `• Total Distributed: <b>${totalTON.toFixed(4)} TON</b>\n`;
 
   const caption =
-    `🏍️💎 <b>RaseenRacing has successfully processed a new TON withdrawal.</b>\n` +
-    `A rider has received their payout directly to their TON wallet with instant network confirmation ⚡️\n\n` +
+    `🏍️💎 RaseenRacing has successfully processed a new TON withdrawal.\n` +
+    `A rider has received their payout directly to their TON\n\n` +
     `${riderLines}\n` +
-    `${amountLine}\n` +
-    `${statsBlock}\n` +
-    `RaseenRacing continues delivering fast, secure, and transparent payouts to all racers worldwide 🌍` +
-    (txLink ? `\n\n🔗 <a href="${txLink}">View TX on TONScan</a>` : ``);
+    `${amountLine}` +
+    (statsBlock ? `\n${statsBlock}` : ``);
 
   const keys = [];
   if (txLink) keys.push({ text: "🔗 View TX", url: txLink });
