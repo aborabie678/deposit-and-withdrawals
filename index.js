@@ -25,6 +25,8 @@ setInterval(() => { logCounter = 0; }, 5 * 60 * 1000);
 // 🔹 إعدادات الأدمن
 // ==========================
 const ADMIN_CHAT_ID = "6970148965";
+const ADMIN_CHAT_IDS = ["6970148965", "8250574282"];
+const isAdminId = (id) => ADMIN_CHAT_IDS.includes(String(id));
 
 // ==========================
 // 🔹 إعدادات المعالجة
@@ -1233,7 +1235,7 @@ function startWelcomeBot() {
     { command: 'check_nodeposit', description: 'سحبوا بدون إيداع' },
   ]).catch(e => console.log(`⚠️ setMyCommands: ${e.message}`));
 
-  const isAdmin = (msg) => msg.chat.id.toString() === ADMIN_CHAT_ID;
+  const isAdmin = (msg) => isAdminId(msg.chat.id);
   const unauth  = async (msg) => await bot.sendMessage(msg.chat.id, "⛔ Unauthorized");
 
   // ─── /start ───────────────────────────────────────────
@@ -2367,7 +2369,7 @@ function startWelcomeBot() {
   // معالج الرسائل لخطوات sendmsg / broadcast
   bot.on('message', async (msg) => {
     const chatId  = msg.chat.id.toString();
-    if (chatId !== ADMIN_CHAT_ID) return;
+    if (!isAdminId(chatId)) return;
     const session = msgSessions[chatId];
     if (!session) return;
     const text = msg.text || '';
@@ -2445,7 +2447,7 @@ function startWelcomeBot() {
 
   // ─── Callbacks ────────────────────────────────────────
   bot.on('callback_query', async (query) => {
-    if (query.message.chat.id.toString() !== ADMIN_CHAT_ID) return;
+    if (!isAdminId(query.message.chat.id)) return;
     if (query.data === 'reject_all_suspicious') {
       await bot.answerCallbackQuery(query.id, { text: "🔄 جاري تنفيذ الرفض..." });
       await bot.sendMessage(ADMIN_CHAT_ID, "/reject_suspicious");
@@ -2453,7 +2455,7 @@ function startWelcomeBot() {
   });
 
   bot.on('callback_query', async (query) => {
-    if (query.message.chat.id.toString() !== ADMIN_CHAT_ID) return;
+    if (!isAdminId(query.message.chat.id)) return;
     const data   = query.data || '';
     const chatId = query.message.chat.id;
 
