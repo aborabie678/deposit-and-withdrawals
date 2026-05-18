@@ -252,8 +252,8 @@ async function sendUserNotification(chatId, amountTon, amountCoins, txHash) {
     `Keep racing. Keep earning. Keep winning 🏁🔥\n\n` +
     (txLink ? `🔗 <a href="${txLink}">View Transaction</a>` : ``);
   const keys = [];
-  if (txLink) keys.push({ text: "🔗 View Transaction", url: txLink });
-  keys.push({ text: "🚀 Open App", url: "https://t.me/RaseenRacing_bot/app?startapp=" });
+  if (txLink) keys.push({ text: "🔗 View TX", url: txLink });
+  keys.push({ text: "🚀 Open", url: "https://t.me/RaseenRacing_bot/app?startapp=" });
   try {
     const res = await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -325,8 +325,8 @@ async function sendChannelNotification(items, txHash) {
     (txLink ? `\n\n🔗 <a href="${txLink}">View TX on TONScan</a>` : ``);
 
   const keys = [];
-  if (txLink) keys.push({ text: "🔗 View Transaction", url: txLink });
-  keys.push({ text: "🚀 Open App", url: "https://t.me/RaseenRacing_bot/app?startapp=" });
+  if (txLink) keys.push({ text: "🔗 View TX", url: txLink });
+  keys.push({ text: "🚀 Open", url: "https://t.me/RaseenRacing_bot/app?startapp=" });
 
   // تحديد القسم والصورة بناءً على إجمالي المبلغ
   const isUnder  = totalTON < THRESHOLD_TON;
@@ -519,7 +519,16 @@ async function validateWithdrawal(withdrawId, data) {
   }
 
   if (roundedAmount > MAX_WITHDRAWAL_AMOUNT) {
-    await db.ref(`withdrawQueue/${withdrawId}`).update({ status: "pending", error: `Exceeds max ${MAX_WITHDRAWAL_AMOUNT} TON — waiting`, updatedAt: Date.now() });
+    // سحب يتجاوز الحد الأقصى — يحتاج مراجعة يدوية من الأدمن
+    const already = (data.status === 'awaiting_manual');
+    if (!already) {
+      await db.ref(`withdrawQueue/${withdrawId}`).update({
+        status: 'awaiting_manual',
+        updatedAt: Date.now(),
+        holdReason: `يتجاوز الحد الأقصى للدفع التلقائي (${MAX_WITHDRAWAL_AMOUNT} TON) — يحتاج موافقة يدوية`,
+      });
+      console.log(`⏸ Manual review required: ${withdrawId} | ${roundedAmount} TON > ${MAX_WITHDRAWAL_AMOUNT} TON`);
+    }
     return { valid: false, skip: false };
   }
   if (roundedAmount < MIN_WITHDRAWAL_AMOUNT) {
@@ -936,7 +945,7 @@ async function checkDeposits() {
           caption:    depositCaption,
           parse_mode: "HTML",
           reply_markup: {
-            inline_keyboard: [[{ text: "🚀 Open App", url: "https://t.me/RaseenRacing_bot/app?startapp=" }]]
+            inline_keyboard: [[{ text: "🚀 Open", url: "https://t.me/RaseenRacing_bot/app?startapp=" }]]
           }
         })
       });
@@ -1004,7 +1013,7 @@ function startWelcomeBot() {
           parse_mode: 'HTML',
           reply_markup: {
             inline_keyboard: [
-              [{ text: "🚀 Open App", url: "https://t.me/RaseenRacing_bot/app?startapp=" }],
+              [{ text: "🚀 Open", url: "https://t.me/RaseenRacing_bot/app?startapp=" }],
               [
                 { text: "📢 Channel", url: "https://t.me/RaseenRacing" },
                 { text: "💬 Community", url: "https://t.me/RaseenRacing_chat" }
@@ -1502,7 +1511,204 @@ function startWelcomeBot() {
     } catch(e) { await adminReply(bot, msg.chat.id, `❌ ${e.message}`); }
   });
 
-  // ─── /check_nodeposit ─────────────────────────────────
+
+  // ─── /pending_wd — مراجعة السحوبات التي تتجاوز الحد الأقصى ─────────────────
+  // حالة المراجعة اليدوية (session state)
+  const manualReviewState = {};   // { [adminChatId]: { list: [], index: 0, mode: 'one_by_one'|'all' } }
+
+  async function buildManualWdMessage(wd, wdId) {
+    const roundedAmount = roundAmount(wd.ton ?? wd.amt);
+    const userId  = wd.userId || 'unknown';
+    const address = wd.address || '—';
+    const requestTime = new Date(wd.ts || Date.now()).toLocaleString('en-GB', { timeZone: 'UTC', hour12: false });
+
+    // إجمالي الإيداعات
+    let totalDepositTon = 0;
+    try {
+      const depSnap = await db.ref(`users/${userId}/deposits`).once('value');
+      const deps = depSnap.val() || {};
+      totalDepositTon = Object.values(deps).reduce((s, d) => s + (Number(d.amount || d.tonAdded || 0)), 0);
+    } catch(e) {}
+
+    // إجمالي السحوبات المدفوعة
+    let totalPaidTon = 0;
+    try {
+      const wdSnap = await db.ref(`users/${userId}/wdHistory`).once('value');
+      const wds = wdSnap.val() || {};
+      totalPaidTon = Object.values(wds).filter(w => w.status === 'paid').reduce((s, w) => s + (Number(w.sentAmount || 0)), 0);
+    } catch(e) {}
+
+    // الإحالات النشطة
+    let activeReferrals = 0;
+    try {
+      const refSnap = await db.ref(`users/${userId}/referrals`).once('value');
+      if (refSnap.exists()) activeReferrals = Object.keys(refSnap.val() || {}).length;
+    } catch(e) {}
+
+    // عدد السحوبات الناجحة
+    let paidCount = 0;
+    try {
+      const wdSnap2 = await db.ref(`users/${userId}/wdHistory`).once('value');
+      const wds2 = wdSnap2.val() || {};
+      paidCount = Object.values(wds2).filter(w => w.status === 'paid').length;
+    } catch(e) {}
+
+    const text =
+      `🔍 <b>سحب يحتاج موافقة يدوية</b>
+` +
+      `${'━'.repeat(30)}
+
+` +
+      `👤 <b>المستخدم:</b> <code>${userId}</code>
+` +
+      `🆔 <b>ID السحب:</b> <code>${wdId}</code>
+
+` +
+      `${'─'.repeat(30)}
+` +
+      `💰 <b>المبلغ المطلوب:</b> <b>${roundedAmount.toFixed(4)} TON</b>
+` +
+      `📬 <b>المحفظة:</b>
+<code>${address}</code>
+
+` +
+      `${'─'.repeat(30)}
+` +
+      `📥 <b>إجمالي الإيداعات:</b> ${totalDepositTon.toFixed(4)} TON
+` +
+      `📤 <b>إجمالي السحوبات المدفوعة:</b> ${totalPaidTon.toFixed(4)} TON
+` +
+      `✅ <b>عدد السحوبات الناجحة:</b> ${paidCount}
+` +
+      `👥 <b>الإحالات النشطة:</b> ${activeReferrals}
+
+` +
+      `${'─'.repeat(30)}
+` +
+      `🕐 <b>الوقت:</b> ${requestTime} UTC
+` +
+      `${'━'.repeat(30)}`;
+
+    return text;
+  }
+
+  bot.onText(/\/pending_wd/, async (msg) => {
+    if (!isAdmin(msg)) { await unauth(msg); return; }
+    const chatId = msg.chat.id.toString();
+    try {
+      const snap  = await db.ref('withdrawQueue').orderByChild('status').equalTo('awaiting_manual').once('value');
+      const items = snap.val();
+      if (!items) { await adminReply(bot, chatId, '📭 لا توجد سحوبات تحتاج مراجعة يدوية حالياً'); return; }
+
+      const list = Object.entries(items)
+        .map(([id, d]) => ({ id, ...d }))
+        .sort((a, b) => (a.ts || 0) - (b.ts || 0));
+
+      const totalTON = list.reduce((s, w) => s + roundAmount(w.ton ?? w.amt), 0);
+
+      await bot.sendMessage(chatId,
+        `📋 <b>السحوبات التي تحتاج موافقة يدوية</b>
+
+` +
+        `📊 العدد: <b>${list.length}</b> طلب
+` +
+        `💰 الإجمالي: <b>${totalTON.toFixed(4)} TON</b>
+
+` +
+        `اختر طريقة المراجعة:`,
+        {
+          parse_mode: 'HTML',
+          reply_markup: {
+            inline_keyboard: [[
+              { text: `📩 طلب طلب (${list.length})`, callback_data: 'manual_wd_one_by_one' },
+              { text: `📋 عرض الكل`,                  callback_data: 'manual_wd_list_all'   },
+            ]]
+          }
+        }
+      );
+
+      manualReviewState[chatId] = { list, index: 0 };
+    } catch(e) { await adminReply(bot, chatId, `❌ ${e.message}`); }
+  });
+
+  // ─── /logs [userId] — السجل المالي الكامل للمستخدم ────────────────────────
+  bot.onText(/\/logs (.+)/, async (msg, match) => {
+    if (!isAdmin(msg)) { await unauth(msg); return; }
+    const userId = match[1].trim();
+    const chatId = msg.chat.id;
+    try {
+      await adminReply(bot, chatId, `🔍 جاري جلب سجل المستخدم <code>${userId}</code>...`);
+
+      const [logSnap, wdSnap, depSnap] = await Promise.all([
+        db.ref(`users/${userId}/log`).limitToLast(30).once('value'),
+        db.ref(`users/${userId}/wdHistory`).once('value'),
+        db.ref(`users/${userId}/deposits`).once('value'),
+      ]);
+
+      const logs    = logSnap.val()  || {};
+      const wdHist  = wdSnap.val()   || {};
+      const deposits = depSnap.val() || {};
+
+      const totalDep  = Object.values(deposits).reduce((s, d) => s + Number(d.amount || d.tonAdded || 0), 0);
+      const totalPaid = Object.values(wdHist).filter(w => w.status === 'paid').reduce((s, w) => s + Number(w.sentAmount || 0), 0);
+      const paidCount = Object.values(wdHist).filter(w => w.status === 'paid').length;
+
+      let text =
+        `📊 <b>السجل المالي — المستخدم <code>${userId}</code></b>
+` +
+        `${'━'.repeat(30)}
+
+` +
+        `📥 إجمالي الإيداعات: <b>${totalDep.toFixed(4)} TON</b>
+` +
+        `📤 إجمالي المسحوب: <b>${totalPaid.toFixed(4)} TON</b>
+` +
+        `✅ سحوبات ناجحة: <b>${paidCount}</b>
+
+` +
+        `${'─'.repeat(30)}
+` +
+        `📋 <b>آخر 30 نشاط:</b>
+
+`;
+
+      const logEntries = Object.entries(logs)
+        .sort((a, b) => (b[1].ts || 0) - (a[1].ts || 0))
+        .slice(0, 30);
+
+      if (!logEntries.length) {
+        text += `<i>لا يوجد سجل نشاط</i>`;
+      } else {
+        logEntries.forEach(([, entry]) => {
+          const date = entry.date ? entry.date.substring(0, 16).replace('T', ' ') : '—';
+          const type = entry.type || '—';
+          const cat  = entry.taskCategory || '';
+          const tid  = entry.taskId || '';
+          text += `• <b>${type}</b>${cat ? ' | ' + cat : ''}${tid ? ' | <code>' + tid + '</code>' : ''}
+  🕐 ${date}
+`;
+        });
+      }
+
+      // تقسيم الرسالة لو طويلة
+      const chunks = [];
+      while (text.length > 3500) {
+        const cut = text.lastIndexOf('\n', 3500);
+        chunks.push(text.substring(0, cut));
+        text = text.substring(cut);
+      }
+      chunks.push(text);
+
+      for (const chunk of chunks) {
+        await adminReply(bot, chatId, chunk);
+        await new Promise(r => setTimeout(r, 300));
+      }
+
+    } catch(e) { await adminReply(bot, chatId, `❌ ${e.message}`); }
+  });
+
+
+    // ─── /check_nodeposit ─────────────────────────────────
   bot.onText(/\/check_nodeposit/, async (msg) => {
     if (!isAdmin(msg)) { await unauth(msg); return; }
     try {
@@ -2125,7 +2331,215 @@ function startWelcomeBot() {
 
     const msgId  = query.message.message_id;
 
-    if (data.startsWith('ban_user:')) {
+    // ── مراجعة يدوية: اختيار طريقة العرض ─────────────────────────────────────
+    if (data === 'manual_wd_one_by_one' || data === 'manual_wd_list_all') {
+      const state = manualReviewState[chatId];
+      if (!state || !state.list.length) {
+        await bot.answerCallbackQuery(query.id, { text: '📭 انتهت القائمة أو انتهت الجلسة — أعد /pending_wd' });
+        return;
+      }
+
+      if (data === 'manual_wd_list_all') {
+        // عرض قائمة مختصرة بجميع الطلبات
+        const totalTON = state.list.reduce((s, w) => s + roundAmount(w.ton ?? w.amt), 0);
+        let text = `📋 <b>جميع السحوبات المعلقة (${state.list.length})</b>\n💰 الإجمالي: <b>${totalTON.toFixed(4)} TON</b>\n${'━'.repeat(28)}\n\n`;
+        state.list.forEach((w, i) => {
+          const amt = roundAmount(w.ton ?? w.amt);
+          text += `${i + 1}. 👤 <code>${w.userId || '?'}</code> — <b>${amt.toFixed(4)} TON</b>\n    🆔 <code>${w.id}</code>\n`;
+        });
+        text += `\n${'━'.repeat(28)}\nاستخدم الزر أدناه لمراجعة واحدة واحدة`;
+        await bot.editMessageText(text, {
+          chat_id: chatId, message_id: msgId, parse_mode: 'HTML',
+          reply_markup: { inline_keyboard: [[{ text: '📩 ابدأ المراجعة طلب طلب', callback_data: 'manual_wd_one_by_one' }]] }
+        });
+        state.index = 0;
+        await bot.answerCallbackQuery(query.id);
+        return;
+      }
+
+      // طلب طلب — إرسال أول/تالي طلب
+      const wd = state.list[state.index];
+      if (!wd) {
+        await bot.answerCallbackQuery(query.id, { text: '✅ انتهت جميع الطلبات' });
+        await bot.editMessageText('✅ <b>تمت مراجعة جميع الطلبات</b>', { chat_id: chatId, message_id: msgId, parse_mode: 'HTML', reply_markup: { inline_keyboard: [] } });
+        delete manualReviewState[chatId];
+        return;
+      }
+
+      const wdText = await buildManualWdMessage(wd, wd.id);
+      const remaining = state.list.length - state.index;
+      const fullText = wdText + `\n\n📊 <b>المتبقي: ${remaining}/${state.list.length}</b>`;
+
+      await bot.editMessageText(fullText, {
+        chat_id: chatId, message_id: msgId, parse_mode: 'HTML',
+        reply_markup: {
+          inline_keyboard: [[
+            { text: '✅ موافقة — ادفع الآن', callback_data: `manual_approve:${wd.id}` },
+            { text: '❌ رفض',                callback_data: `manual_reject:${wd.id}`  },
+            { text: '📋 Logs',               callback_data: `wd_logs:${wd.userId || ''}` },
+          ]]
+        }
+      });
+      await bot.answerCallbackQuery(query.id);
+      return;
+    }
+
+    // ── موافقة يدوية على سحب ────────────────────────────────────────────────
+    if (data.startsWith('manual_approve:')) {
+      const withdrawId = data.replace('manual_approve:', '').trim();
+      try {
+        const snap = await db.ref(`withdrawQueue/${withdrawId}`).once('value');
+        const wd   = snap.val();
+        if (!wd) { await bot.answerCallbackQuery(query.id, { text: '❌ السحب غير موجود!' }); return; }
+        await db.ref(`withdrawQueue/${withdrawId}`).update({
+          status: 'pending', approvedByAdmin: true, updatedAt: Date.now(), holdReason: null
+        });
+        // تقديم التالي في الجلسة
+        const state = manualReviewState[chatId];
+        if (state) state.index++;
+        await bot.editMessageText(
+          (query.message.text || '') + `\n\n✅ <b>تمت الموافقة — جاري الدفع...</b>`,
+          { chat_id: chatId, message_id: msgId, parse_mode: 'HTML', reply_markup: { inline_keyboard: [] } }
+        );
+        await bot.answerCallbackQuery(query.id, { text: '✅ تمت الموافقة — سيتم الدفع الآن' });
+        setTimeout(() => processPendingWithdrawals(), 1000);
+
+        // إرسال الطلب التالي تلقائياً لو في جلسة نشطة
+        if (state && state.list[state.index]) {
+          const next = state.list[state.index];
+          const nextText = await buildManualWdMessage(next, next.id);
+          const remaining = state.list.length - state.index;
+          await bot.sendMessage(chatId,
+            nextText + `\n\n📊 <b>المتبقي: ${remaining}/${state.list.length}</b>`,
+            {
+              parse_mode: 'HTML',
+              reply_markup: {
+                inline_keyboard: [[
+                  { text: '✅ موافقة — ادفع الآن', callback_data: `manual_approve:${next.id}` },
+                  { text: '❌ رفض',                callback_data: `manual_reject:${next.id}`  },
+                  { text: '📋 Logs',               callback_data: `wd_logs:${next.userId || ''}` },
+                ]]
+              }
+            }
+          );
+        } else if (state && !state.list[state.index]) {
+          await bot.sendMessage(chatId, '✅ <b>تمت مراجعة جميع الطلبات</b>', { parse_mode: 'HTML' });
+          delete manualReviewState[chatId];
+        }
+      } catch(e) { await bot.answerCallbackQuery(query.id, { text: `❌ ${e.message}` }); }
+      return;
+    }
+
+    // ── رفض يدوي لسحب ───────────────────────────────────────────────────────
+    if (data.startsWith('manual_reject:')) {
+      const withdrawId = data.replace('manual_reject:', '').trim();
+      try {
+        const snap = await db.ref(`withdrawQueue/${withdrawId}`).once('value');
+        const wd   = snap.val();
+        if (!wd) { await bot.answerCallbackQuery(query.id, { text: '❌ السحب غير موجود!' }); return; }
+        await db.ref(`withdrawQueue/${withdrawId}`).update({
+          status: 'cancelled', updatedAt: Date.now(), holdReason: 'رُفض يدوياً من الأدمن'
+        });
+        if (wd.userId && wd.wdId) {
+          await db.ref(`users/${wd.userId}/wdHistory/${wd.wdId}`).update({ status: 'cancelled', updatedAt: Date.now() }).catch(() => {});
+        }
+        const state = manualReviewState[chatId];
+        if (state) state.index++;
+        await bot.editMessageText(
+          (query.message.text || '') + `\n\n❌ <b>تم الرفض والإلغاء</b>`,
+          { chat_id: chatId, message_id: msgId, parse_mode: 'HTML', reply_markup: { inline_keyboard: [] } }
+        );
+        await bot.answerCallbackQuery(query.id, { text: '❌ تم رفض السحب' });
+
+        // إرسال الطلب التالي تلقائياً
+        if (state && state.list[state.index]) {
+          const next = state.list[state.index];
+          const nextText = await buildManualWdMessage(next, next.id);
+          const remaining = state.list.length - state.index;
+          await bot.sendMessage(chatId,
+            nextText + `\n\n📊 <b>المتبقي: ${remaining}/${state.list.length}</b>`,
+            {
+              parse_mode: 'HTML',
+              reply_markup: {
+                inline_keyboard: [[
+                  { text: '✅ موافقة — ادفع الآن', callback_data: `manual_approve:${next.id}` },
+                  { text: '❌ رفض',                callback_data: `manual_reject:${next.id}`  },
+                  { text: '📋 Logs',               callback_data: `wd_logs:${next.userId || ''}` },
+                ]]
+              }
+            }
+          );
+        } else if (state && !state.list[state.index]) {
+          await bot.sendMessage(chatId, '✅ <b>تمت مراجعة جميع الطلبات</b>', { parse_mode: 'HTML' });
+          delete manualReviewState[chatId];
+        }
+      } catch(e) { await bot.answerCallbackQuery(query.id, { text: `❌ ${e.message}` }); }
+      return;
+    }
+
+    // ── Logs المستخدم من زر السحب ────────────────────────────────────────────
+    if (data.startsWith('wd_logs:')) {
+      const userId = data.replace('wd_logs:', '').trim();
+      if (!userId) { await bot.answerCallbackQuery(query.id, { text: '❌ لا يوجد userId' }); return; }
+      await bot.answerCallbackQuery(query.id, { text: '📋 جاري جلب السجل...' });
+      try {
+        const [logSnap, wdSnap, depSnap] = await Promise.all([
+          db.ref(`users/${userId}/log`).limitToLast(30).once('value'),
+          db.ref(`users/${userId}/wdHistory`).once('value'),
+          db.ref(`users/${userId}/deposits`).once('value'),
+        ]);
+        const logs     = logSnap.val()  || {};
+        const wdHist   = wdSnap.val()   || {};
+        const deposits = depSnap.val()  || {};
+
+        const totalDep  = Object.values(deposits).reduce((s, d) => s + Number(d.amount || d.tonAdded || 0), 0);
+        const totalPaid = Object.values(wdHist).filter(w => w.status === 'paid').reduce((s, w) => s + Number(w.sentAmount || 0), 0);
+        const paidCount = Object.values(wdHist).filter(w => w.status === 'paid').length;
+
+        let text =
+          `📊 <b>السجل المالي — <code>${userId}</code></b>\n` +
+          `${'━'.repeat(28)}\n\n` +
+          `📥 إجمالي الإيداعات: <b>${totalDep.toFixed(4)} TON</b>\n` +
+          `📤 إجمالي المسحوب: <b>${totalPaid.toFixed(4)} TON</b>\n` +
+          `✅ سحوبات ناجحة: <b>${paidCount}</b>\n\n` +
+          `${'─'.repeat(28)}\n` +
+          `📋 <b>آخر 30 نشاط:</b>\n\n`;
+
+        const logEntries = Object.entries(logs)
+          .sort((a, b) => (b[1].ts || 0) - (a[1].ts || 0))
+          .slice(0, 30);
+
+        if (!logEntries.length) {
+          text += `<i>لا يوجد سجل نشاط</i>`;
+        } else {
+          logEntries.forEach(([, entry]) => {
+            const date = entry.date ? entry.date.substring(0, 16).replace('T', ' ') : '—';
+            const type = entry.type || '—';
+            const cat  = entry.taskCategory || '';
+            const tid  = entry.taskId || '';
+            text += `• <b>${type}</b>${cat ? ' | ' + cat : ''}${tid ? ' | <code>' + tid + '</code>' : ''}\n  🕐 ${date}\n`;
+          });
+        }
+
+        const chunks = [];
+        let remaining2 = text;
+        while (remaining2.length > 3500) {
+          const cut = remaining2.lastIndexOf('\n', 3500);
+          chunks.push(remaining2.substring(0, cut));
+          remaining2 = remaining2.substring(cut);
+        }
+        chunks.push(remaining2);
+
+        for (const chunk of chunks) {
+          await adminReply(bot, chatId, chunk);
+          await new Promise(r => setTimeout(r, 200));
+        }
+      } catch(e) { await adminReply(bot, chatId, `❌ ${e.message}`); }
+      return;
+    }
+
+
+        if (data.startsWith('ban_user:')) {
       const uid = data.replace('ban_user:', '').trim();
       await db.ref(`bannedUsers/${uid}`).set({ bannedAt: Date.now(), by: 'admin' });
       await bot.answerCallbackQuery(query.id, { text: `🚫 تم حظر ${uid}` });
