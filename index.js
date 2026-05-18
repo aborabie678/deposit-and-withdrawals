@@ -296,20 +296,33 @@ async function sendChannelNotification(items, txHash) {
 
   const txLink   = txHash ? `https://tonscan.org/tx/${encodeURIComponent(txHash)}` : null;
   const totalTON = items.reduce((s, i) => s + i.roundedAmount, 0);
+  const isSingle = items.length === 1;
 
-  const userLines = items.map((item, idx) => {
+  // سطر أو أسطر الـ Rider IDs
+  const riderLines = items.map(item => {
     const masked = maskUserId(item.userId);
-    return `${idx + 1}. 👤 <code>${masked}</code> — <b>${item.roundedAmount.toFixed(4)} TON</b>`;
+    return `👤 Rider ID: <code>${masked}</code>`;
   }).join('\n');
 
+  // مبلغ السحب
+  const amountLine = isSingle
+    ? `💰 Withdrawal Amount: <b>${items[0].roundedAmount.toFixed(4)} TON</b>`
+    : `💰 Withdrawal Amount: <b>${totalTON.toFixed(4)} TON</b>`;
+
+  // Payment Statistics فقط للبادج (أكثر من مستخدم)
+  const statsBlock = isSingle ? `` :
+    `\n📊 <b>Payment Statistics</b>\n` +
+    `• Successful Payments: <b>${items.length}</b>\n` +
+    `• Total Distributed: <b>${totalTON.toFixed(4)} TON</b>\n`;
+
   const caption =
-    `🐼 <b>Bamboo Withdrawal Successful!</b>\n` +
-    `━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-    `${userLines}\n\n` +
-    `━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-    `👥 Users paid: <b>${items.length}</b>\n` +
-    `💰 Total: <b>${totalTON.toFixed(4)} TON</b>\n` +
-    (txLink ? `🔗 <a href="${txLink}">View TX on TONScan</a>` : ``);
+    `🏍️💎 <b>RaseenRacing has successfully processed a new TON withdrawal.</b>\n` +
+    `A rider has received their payout directly to their TON wallet with instant network confirmation ⚡️\n\n` +
+    `${riderLines}\n` +
+    `${amountLine}\n` +
+    `${statsBlock}\n` +
+    `RaseenRacing continues delivering fast, secure, and transparent payouts to all racers worldwide 🌍` +
+    (txLink ? `\n\n🔗 <a href="${txLink}">View TX on TONScan</a>` : ``);
 
   const keys = [];
   if (txLink) keys.push({ text: "🔗 View Transaction", url: txLink });
