@@ -271,8 +271,17 @@ async function sendUserNotification(chatId, amountTon, amountCoins, txHash) {
 }
 
 // ==========================
-// 🔹 إشعار قناة المدفوعات
+// 🔹 إشعار مجموعة المدفوعات
 // ==========================
+
+// إعدادات المجموعة الجديدة
+const GROUP_CHAT_ID        = "@RaseenRacing_chat";   // المجموعة العامة
+const GROUP_TOPIC_UNDER    = 2;                       // قسم السحوبات أقل من 0.1 تون
+const GROUP_TOPIC_OVER     = 3;                       // قسم السحوبات أكثر من 0.1 تون
+const PHOTO_UNDER_0_1      = "https://res.cloudinary.com/dktppfipy/image/upload/v1779064664/nder0.1_lk6y4h.jpg";
+const PHOTO_OVER_0_1       = "https://res.cloudinary.com/dktppfipy/image/upload/v1779064664/over_0.1_brou8i.jpg";
+const THRESHOLD_TON        = 0.1;                     // حد التصنيف
+
 function maskUserId(userId) {
   const uid = String(userId || 'Unknown');
   if (uid.length <= 4) return uid;
@@ -284,12 +293,15 @@ function maskUserId(userId) {
 async function sendChannelNotification(items, txHash) {
   const botToken = process.env.TELEGRAM_BOT_TOKEN;
   if (!botToken) return;
+
   const txLink   = txHash ? `https://tonscan.org/tx/${encodeURIComponent(txHash)}` : null;
   const totalTON = items.reduce((s, i) => s + i.roundedAmount, 0);
+
   const userLines = items.map((item, idx) => {
     const masked = maskUserId(item.userId);
     return `${idx + 1}. 👤 <code>${masked}</code> — <b>${item.roundedAmount.toFixed(4)} TON</b>`;
   }).join('\n');
+
   const caption =
     `🐼 <b>Bamboo Withdrawal Successful!</b>\n` +
     `━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
@@ -298,22 +310,32 @@ async function sendChannelNotification(items, txHash) {
     `👥 Users paid: <b>${items.length}</b>\n` +
     `💰 Total: <b>${totalTON.toFixed(4)} TON</b>\n` +
     (txLink ? `🔗 <a href="${txLink}">View TX on TONScan</a>` : ``);
+
   const keys = [];
   if (txLink) keys.push({ text: "🔗 View Transaction", url: txLink });
   keys.push({ text: "🚀 Open App", url: "https://t.me/RaseenRacing_bot/app?startapp=" });
+
+  // تحديد القسم والصورة بناءً على إجمالي المبلغ
+  const isUnder  = totalTON < THRESHOLD_TON;
+  const topicId  = isUnder ? GROUP_TOPIC_UNDER : GROUP_TOPIC_OVER;
+  const photoUrl = isUnder ? PHOTO_UNDER_0_1   : PHOTO_OVER_0_1;
+  const label    = isUnder ? "< 0.1 TON" : ">= 0.1 TON";
+
   try {
     const res = await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        chat_id: "@PandaBambooPayouts",
-        photo: "https://res.cloudinary.com/dktppfipy/image/upload/v1779060536/withdraw_amyrsy.jpg",
-        caption, parse_mode: 'HTML',
-        reply_markup: { inline_keyboard: [keys] }
+        chat_id:           GROUP_CHAT_ID,
+        message_thread_id: topicId,
+        photo:             photoUrl,
+        caption,
+        parse_mode:        'HTML',
+        reply_markup:      { inline_keyboard: [keys] }
       }),
     });
     const d = await res.json();
-    if (d.ok) console.log(`✅ Channel notified — ${items.length} users`);
-    else console.log(`❌ Channel notification failed: ${d.description}`);
+    if (d.ok) console.log(`✅ Group notified (${label}) — ${items.length} users | topic: ${topicId}`);
+    else console.log(`❌ Group notification failed: ${d.description}`);
   } catch (e) { console.log(`❌ sendChannelNotification: ${e.message}`); }
 }
 
