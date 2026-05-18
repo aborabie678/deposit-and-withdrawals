@@ -359,12 +359,12 @@ async function updateUserWdHistory(userId, wdId, txHash, amountTon) {
 // 🔹 التحقق من صلاحية السحب
 // ==========================
 async function validateWithdrawal(withdrawId, data) {
-  if (!data?.address || !data?.ton) {
+  if (!data?.address || (!data?.ton && !data?.amt)) {
     await db.ref(`withdrawQueue/${withdrawId}`).update({ status: "failed", error: "Invalid data", updatedAt: Date.now() });
     return { valid: false, skip: true };
   }
 
-  const roundedAmount = roundAmount(data.ton);
+  const roundedAmount = roundAmount(data.ton ?? data.amt);
   const userId        = data.userId || null;
   const wdId          = data.wdId   || withdrawId;
   const addr          = String(data.address || '').trim();
