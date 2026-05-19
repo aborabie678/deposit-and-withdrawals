@@ -1079,9 +1079,23 @@ async function checkDeposits() {
       const txHash = tx.transaction_id.hash;
       if (!tx.in_msg || !tx.in_msg.message) continue;
       let comment = tx.in_msg.message.trim();
-      if (!comment || !/^\d+$/.test(comment)) continue;
+      if (!comment) continue;
 
-      const userId    = comment;
+      // استخراج userId من الكومنت — يدعم الشكلين:
+      //   الجديد: {"user_id":"7278991674","TG":"RaseenRacing_bot"}
+      //   القديم: 7278991674
+      let userId = null;
+      if (comment.startsWith('{')) {
+        try {
+          const parsed = JSON.parse(comment);
+          if (parsed && parsed.user_id && /^\d+$/.test(String(parsed.user_id))) {
+            userId = String(parsed.user_id);
+          }
+        } catch (e) {}
+      } else if (/^\d+$/.test(comment)) {
+        userId = comment;
+      }
+      if (!userId) continue;
       const amountTon = Number(tx.in_msg.value) / 1e9;
       if (amountTon <= 0) continue;
 
