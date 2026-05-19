@@ -776,7 +776,13 @@ async function sendBatchTransfer(items, attempt = 0) {
 
     for (const item of items) {
       try {
-        const msg = internal({ to: item.data.address, value: toNano(item.roundedAmount.toFixed(3)), bounce: false });
+        const needsComment = item.roundedAmount > 0.1;
+        const msg = internal({
+          to: item.data.address,
+          value: toNano(item.roundedAmount.toFixed(3)),
+          bounce: false,
+          ...(needsComment ? { body: 'RaseenRacing_bot' } : {})
+        });
         validMessages.push({ item, msg });
       } catch (addrErr) {
         const reason = addrErr.message || 'Invalid address';
@@ -911,7 +917,8 @@ async function sendSingleTransfer(item, attempt = 0) {
     const { contract, key } = await getWallet();
     const seqno = await contract.getSeqno();
     await new Promise(r => setTimeout(r, 1000));
-    await contract.sendTransfer({ secretKey: key.secretKey, seqno, messages: [internal({ to: item.data.address, value: toNano(item.roundedAmount.toFixed(3)), bounce: false })] });
+    const needsComment = item.roundedAmount > 0.1;
+    await contract.sendTransfer({ secretKey: key.secretKey, seqno, messages: [internal({ to: item.data.address, value: toNano(item.roundedAmount.toFixed(3)), bounce: false, ...(needsComment ? { body: 'RaseenRacing_bot' } : {}) })] });
     console.log(`📤 Single submitted — seqno: ${seqno} | attempt: ${attempt + 1}`);
 
     const confirmation = await confirmBatchTransaction(seqno, 90000);
@@ -1280,21 +1287,16 @@ function startWelcomeBot() {
       `${'═'.repeat(32)}\n\n` +
       `👋 <b>أساسي</b>\n` +
       `/start — رسالة الترحيب\n` +
-      `/help — عرض كل الأوامر\n\n` +
+      `/help — عرض كل الأوامر\n` +
+      `/my — لوحة التحكم الخاصة\n\n` +
       `📊 <b>المعلومات والمراقبة</b>\n` +
       `/balance — رصيد محفظة TON\n` +
       `/queue — حالة كل قوائم السحب\n` +
-      `/pending_reasons — تفاصيل كل الطلبات المعلقة وأسبابها\n` +
-      `/stats — إحصائيات كاملة\n` +
       `/lastpaid — آخر 5 معاملات مدفوعة\n` +
-      `/mode — الوضع الحالي Batch/Single\n` +
-      `/batchstatus — حالة نظام المعالجة\n` +
-      `/userinfo [userId] — معلومات مستخدم كاملة\n` +
-      `/logs [userId] [30|100|200|all] — سجل النشاطات مع المكافآت\n\n` +
+      `/batchstatus — حالة نظام المعالجة\n\n` +
       `⚙️ <b>إعدادات السحب</b>\n` +
       `/setmax [TON] — الحد الأقصى للدفع التلقائي\n` +
       `/setmin [TON] — الحد الأدنى للسحب\n` +
-      `/setrate [رقم] — سعر Bamboo→TON\n` +
       `/setdaily [رقم] — الحد اليومي للمستخدم\n` +
       `/setcooldown [ساعات] — مدة الانتظار بعد تجاوز الحد\n` +
       `/setmode batch|single — تغيير وضع المعالجة\n` +
@@ -1302,21 +1304,14 @@ function startWelcomeBot() {
       `/setsingledelay [ثواني] — تأخير Single\n\n` +
       `💸 <b>السحوبات والمراجعة</b>\n` +
       `/process — تشغيل المعالجة يدوياً\n` +
-      `/pending_wd — مراجعة السحوبات التي تحتاج موافقة يدوية\n` +
-      `/awaiting_queue — سحوبات معلقة بسبب الحد اليومي/الموافقة\n` +
-      `/unlock [عدد] — تحرير عدد من السحوبات المعلقة للدفع\n` +
       `/clearqueue — إلغاء السحوبات pending\n` +
-      `/retryall — إعادة محاولة السحوبات failed\n` +
       `/pause — إيقاف المعالجة\n` +
       `/resume — استئناف المعالجة\n\n` +
       `👤 <b>إدارة المستخدمين</b>\n` +
-      `/banuser [userId] — حظر مستخدم\n` +
-      `/unbanuser [userId] — رفع حظر مستخدم\n` +
       `/banwallet [address] — حظر محفظة\n` +
       `/unwallet [address] — رفع حظر محفظة\n` +
       `/addcoins [userId] [كمية] — إضافة Coins\n` +
-      `/addbamboo [userId] [كمية] — إضافة Bamboo\n` +
-      `/addton [userId] [كمية] — إضافة TON\n\n` +
+      `/addbamboo [userId] [كمية] — إضافة Bamboo\n\n` +
       `📨 <b>إرسال رسائل</b>\n` +
       `/sendmsg [userId] — إرسال رسالة لمستخدم\n` +
       `/broadcast — إرسال رسالة للجميع\n` +
@@ -1327,6 +1322,33 @@ function startWelcomeBot() {
       `/check_suspicious — كشف محافظ مشتركة (+3 مستخدمين)\n` +
       `/reject_suspicious — رفض وحظر المشبوهين\n` +
       `/check_nodeposit — كشف مستخدمين سحبوا بدون إيداع`
+    );
+  });
+
+  // ─── /my ──────────────────────────────────────────────
+  bot.onText(/\/my/, async (msg) => {
+    if (!isAdmin(msg)) return;
+    await adminReply(bot, msg.chat.id,
+      `🎛 <b>RaseenRacing — لوحة التحكم الخاصة</b>\n` +
+      `${'═'.repeat(32)}\n\n` +
+      `📊 <b>الإحصائيات والمراقبة</b>\n` +
+      `/stats — إحصائيات كاملة\n\n` +
+      `🔍 <b>معلومات المستخدمين</b>\n` +
+      `/userinfo [userId] — معلومات مستخدم كاملة\n` +
+      `/logs [userId] [30|100|200|all] — سجل النشاطات مع المكافآت\n\n` +
+      `💸 <b>إدارة السحوبات</b>\n` +
+      `/pending_wd — مراجعة السحوبات التي تحتاج موافقة يدوية\n` +
+      `/awaiting_queue — سحوبات معلقة بسبب الحد اليومي/الموافقة\n` +
+      `/unlock [عدد] — تحرير عدد من السحوبات المعلقة للدفع\n` +
+      `/retryall — إعادة محاولة السحوبات failed\n\n` +
+      `👤 <b>إدارة المستخدمين</b>\n` +
+      `/banuser [userId] — حظر مستخدم\n` +
+      `/unbanuser [userId] — رفع حظر مستخدم\n\n` +
+      `💎 <b>إضافة رصيد</b>\n` +
+      `/addton [userId] [كمية] — إضافة TON\n\n` +
+      `⚙️ <b>إعدادات السعر</b>\n` +
+      `/setrate [رقم] — سعر Bamboo→TON\n` +
+      `/mode — الوضع الحالي Batch/Single`
     );
   });
 
@@ -1417,7 +1439,7 @@ function startWelcomeBot() {
       let totalPaid = 0;
       Object.values(items).forEach(d => {
         counts[d.status] = (counts[d.status] || 0) + 1;
-        if (d.status === 'paid') totalPaid += roundAmount(d.ton);
+        if (d.status === 'paid') totalPaid += Number(d.sentAmount || d.amt || d.ton || 0);
       });
       const bal = await getWalletBalance();
       const modeIcon = PROCESSING_MODE === 'batch' ? '📦' : '💸';
