@@ -474,6 +474,33 @@ async function sendUserNotification(chatId, amountTon, amountCoins, txHash) {
 }
 
 // ==========================
+// 🔹 إشعار المستخدم بفشل السحب
+// ==========================
+async function sendUserFailureNotification(chatId, withdrawId, reason, address) {
+  const botToken = process.env.TELEGRAM_BOT_TOKEN;
+  if (!botToken || !chatId) return false;
+  const shortId   = String(withdrawId).substring(0, 30);
+  const shortAddr = address ? String(address).substring(0, 48) : '—';
+  const text =
+    `⚠️ <b>Corrupted Wallet Address — Request Cancelled</b>\n\n` +
+    `🆔 ID: <code>${shortId}</code>\n` +
+    `👤 User: <code>${chatId}</code>\n` +
+    `❌ Reason: ${reason}\n` +
+    `📬 Address:\n<code>${shortAddr}</code>\n\n` +
+    `Please update your wallet address and try again.`;
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML' }),
+    });
+    const data = await res.json();
+    if (data.ok) { console.log(`✅ Failure notice sent to user: ${chatId}`); return true; }
+    console.log(`❌ sendUserFailureNotification: ${data.description}`); return false;
+  } catch (e) { console.log(`❌ sendUserFailureNotification: ${e.message}`); return false; }
+}
+
+// ==========================
 // 🔹 إشعار مجموعة المدفوعات
 // ==========================
 
@@ -586,12 +613,10 @@ async function validateWithdrawal(withdrawId, data) {
   const validPrefix  = addr.startsWith("EQ") || addr.startsWith("UQ");
   const validLength  = addr.length === 48;
   const validChars   = /^[A-Za-z0-9+/\-_=]+$/.test(addr);
-  const duplicated   = addr.indexOf("EQ", 2) !== -1 || addr.indexOf("UQ", 2) !== -1;
   const hasSpaces    = addr.includes(' ');
 
   let addrError = null;
-  if (!validPrefix)  addrError = `Invalid prefix (expected EQ/UQ, got ${addr.substring(0,2)})`;
-  else if (duplicated) addrError = `Duplicated address — two addresses merged`;
+  if (!validPrefix)      addrError = `Invalid prefix (expected EQ/UQ, got ${addr.substring(0,2)})`;
   else if (!validLength) addrError = `Invalid length: ${addr.length} (expected 48)`;
   else if (!validChars)  addrError = `Invalid characters in address`;
   else if (hasSpaces)    addrError = `Address contains spaces`;
@@ -602,11 +627,16 @@ async function validateWithdrawal(withdrawId, data) {
     if (userId && wdId) {
       await db.ref(`users/${userId}/wdHistory/${wdId}`).update({ status: "cancelled", updatedAt: Date.now() }).catch(() => {});
     }
+    // إشعار الأدمن
     if (botInstance) {
       await botInstance.sendMessage(ADMIN_CHAT_ID,
         `⚠️ <b>عنوان محفظة فاسد — تم إلغاء الطلب</b>\n\n🆔 ID: <code>${withdrawId}</code>\n👤 User: <code>${userId || '?'}</code>\n❌ السبب: ${addrError}\n📬 العنوان:\n<code>${addr.substring(0, 80)}</code>`,
         { parse_mode: 'HTML' }
       ).catch(() => {});
+    }
+    // إشعار المستخدم برسالة خاصة
+    if (userId) {
+      await sendUserFailureNotification(userId, withdrawId, addrError, addr).catch(() => {});
     }
     return { valid: false, skip: true };
   }
@@ -738,6 +768,61 @@ async function validateWithdrawal(withdrawId, data) {
   }
 
   await db.ref(`withdrawQueue/${withdrawId}`).update({ error: null, lastError: null, updatedAt: Date.now() }).catch(() => {});
+
+  // ==========================
+  // 🔹 فحص نشاط المحفظة (يجب أن تكون عليها معاملة واحدة على الأقل)
+  // ==========================
+  if (!data.approvedByAdmin) {
+    try {
+      const activityRes = await fetch(
+        `https://toncenter.com/api/v2/getTransactions?address=${encodeURIComponent(addr)}&limit=1`,
+        { headers: { 'X-API-Key': process.env.TON_API_KEY } }
+      );
+      const activityData = await activityRes.json();
+      const txCount = Array.isArray(activityData?.result) ? activityData.result.length : 0;
+
+      if (txCount === 0) {
+        console.log(`🚫 Inactive wallet — no transactions found: ${addr.substring(0, 20)}... | user: ${userId}`);
+        await db.ref(`withdrawQueue/${withdrawId}`).update({
+          status:     'cancelled',
+          error:      'Inactive wallet — no transactions found',
+          updatedAt:  Date.now(),
+        });
+        if (userId && wdId) {
+          await db.ref(`users/${userId}/wdHistory/${wdId}`).update({ status: 'cancelled', updatedAt: Date.now() }).catch(() => {});
+        }
+        // إشعار الأدمن
+        if (botInstance) {
+          await botInstance.sendMessage(ADMIN_CHAT_ID,
+            `🚫 <b>محفظة غير نشطة — تم رفض السحب</b>\n\n🆔 ID: <code>${withdrawId}</code>\n👤 User: <code>${userId || '?'}</code>\n📬 العنوان:\n<code>${addr}</code>\n\n⚠️ لا توجد أي معاملة على هذه المحفظة.`,
+            { parse_mode: 'HTML' }
+          ).catch(() => {});
+        }
+        // إشعار المستخدم
+        if (userId) {
+          const botToken = process.env.TELEGRAM_BOT_TOKEN;
+          if (botToken) {
+            const userMsg =
+              `🚫 <b>Withdrawal Rejected — Inactive Wallet</b>\n\n` +
+              `🆔 ID: <code>${withdrawId}</code>\n` +
+              `👤 User: <code>${userId}</code>\n` +
+              `❌ Reason: Your wallet has no transactions yet. Please use an active wallet that has at least one transaction.\n` +
+              `📬 Address:\n<code>${addr}</code>`;
+            await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+              method:  'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ chat_id: userId, text: userMsg, parse_mode: 'HTML' }),
+            }).catch(() => {});
+          }
+        }
+        return { valid: false, skip: true };
+      }
+      console.log(`✅ Wallet activity check passed: ${addr.substring(0, 20)}...`);
+    } catch (e) {
+      console.log(`⚠️ Wallet activity check error (skipping): ${e.message}`);
+    }
+  }
+
   return { valid: true, roundedAmount, userId, wdId };
 }
 
@@ -791,6 +876,10 @@ async function sendBatchTransfer(items, attempt = 0) {
         await db.ref(`withdrawQueue/${item.id}`).update({ status: "cancelled", updatedAt: Date.now(), error: `Bad address: ${reason}` }).catch(() => {});
         if (item.userId && item.wdId) {
           await db.ref(`users/${item.userId}/wdHistory/${item.wdId}`).update({ status: "cancelled", updatedAt: Date.now() }).catch(() => {});
+        }
+        // إشعار المستخدم برسالة خاصة
+        if (item.userId) {
+          await sendUserFailureNotification(item.userId, item.id, reason, item.data.address).catch(() => {});
         }
         processingQueue.delete(item.id);
       }
